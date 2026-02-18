@@ -15,8 +15,6 @@ from sms_format import (
 )
 from sms_format_repository import (
     Company,
-    delete_format_by_id,
-    delete_format_by_name,
     find_format_by_name,
     get_src_dir,
     list_companies,
@@ -89,7 +87,6 @@ def run_validation():
         bank_dir_name = f"{company.name}_{company.id}" if company.id is not None else company.name
         bank_path = src_dir / bank_dir_name
         bank_name = company.name
-        bank_id = company.id
 
         if bank_name != clean_name(bank_name):
             errors.append(
@@ -176,17 +173,10 @@ def apply_fixes(errors):
     format_renames = list(format_rename_target.items())
 
     for file_path in to_delete:
-        company_id = _company_id_from_path(file_path)
-        format_name, format_id, _old_stem = _format_name_and_id_from_path(file_path)
-        if format_id is not None:
-            try:
-                delete_format_by_id(
-                    str(format_id), str(company_id) if company_id is not None else None
-                )
-            except ValueError:
-                continue
-        elif company_id is not None:
-            delete_format_by_name(format_name, str(company_id))
+        # Delete by exact path to avoid ambiguities when duplicate ids/names exist.
+        path_obj = Path(file_path)
+        if path_obj.exists():
+            path_obj.unlink()
 
     for file_path, remove_set in to_remove_examples.items():
         if file_path in to_delete:
@@ -200,10 +190,10 @@ def apply_fixes(errors):
             continue
         kept = [ex for ex in parsed.examples if ex not in remove_set]
         if not kept:
-            if format_id is not None:
-                delete_format_by_id(str(format_id), str(company_id))
-            else:
-                delete_format_by_name(format_name, str(company_id))
+            # Delete exact file instead of name/id lookup (can be ambiguous during renames/fixes).
+            path_obj = Path(file_path)
+            if path_obj.exists():
+                path_obj.unlink()
         else:
             updated = SmsFormat(
                 regex=parsed.regex,
@@ -228,7 +218,9 @@ def apply_fixes(errors):
         if not parsed:
             continue
         save_format(parsed, str(company_id), file_stem=new_stem)
-        delete_format_by_name(old_name, str(company_id))
+        old_file = Path(old_path)
+        if old_file.exists():
+            old_file.unlink()
 
     for bank_path_str, expected_name in bank_renames:
         company_id = parse_name_with_id(Path(bank_path_str).name)["id"]

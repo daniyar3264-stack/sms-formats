@@ -7,6 +7,31 @@ from typing import List, Optional, Union
 
 MARKER_COLUMNS = "-----COLUMNS-----"
 MARKER_EXAMPLE = "-----EXAMPLE-----"
+_INVALID_FILENAME_CHARS_RE = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]+')
+_WINDOWS_RESERVED_BASENAMES = {
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    "com1",
+    "com2",
+    "com3",
+    "com4",
+    "com5",
+    "com6",
+    "com7",
+    "com8",
+    "com9",
+    "lpt1",
+    "lpt2",
+    "lpt3",
+    "lpt4",
+    "lpt5",
+    "lpt6",
+    "lpt7",
+    "lpt8",
+    "lpt9",
+}
 
 ALLOWED_COLUMNS = {
     "payee",
@@ -101,10 +126,22 @@ class DeletedSmsFormat:
 def clean_name(name):
     if not isinstance(name, str):
         return ""
-    s = re.sub(r"['\"$]", "", name)
+    s = re.sub(r"[?*'\"$]", "", name)
     s = re.sub(r"[/\\.{}_()]", " ", s)
+    # Keep only filename-safe characters across Windows/Linux/macOS by
+    # removing forbidden path/control symbols and normalizing whitespace.
+    s = _INVALID_FILENAME_CHARS_RE.sub(" ", s)
     s = re.sub(r"\s+", " ", s)
-    return s.strip()
+    s = s.strip()
+    # Windows disallows trailing dots/spaces in file/folder names.
+    s = s.rstrip(" .")
+    if not s:
+        return ""
+    # Reserved Windows device names are forbidden even with extensions.
+    basename = s.split(".", 1)[0].strip().lower()
+    if basename in _WINDOWS_RESERVED_BASENAMES:
+        s = f"{s} file"
+    return s
 
 
 def _clean_text(text):
@@ -307,7 +344,7 @@ def validate_cross_match(formats_with_regex):
                                 file_path=file_path,
                                 message=(
                                     f"example {ex_idx + 1}/{len(fmt.examples)}: "
-                                    f"{preview} — matches {other_path}",
+                                    f"{preview} — matches {other_path}"
                                 ),
                                 example_index=ex_idx,
                                 example_text=example,
