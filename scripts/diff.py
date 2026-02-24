@@ -35,35 +35,26 @@ from sms_format_repository import (
 COMMIT_HASH_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
 
-def _run_git(args, env=None):
+def _run_git(args, env=None, return_result=False):
     import os
 
+    git_args = list(args)
+    if git_args and git_args[0] == "git":
+        git_args = ["git", "-c", "core.quotepath=false", *git_args[1:]]
     full_env = {**os.environ, **(env or {})}
     result = subprocess.run(
-        args,
+        git_args,
         capture_output=True,
         text=True,
         env=full_env,
         cwd=str(get_repo_root()),
     )
+    if return_result:
+        return result
     if result.returncode != 0:
         cmd = " ".join(args)
         raise RuntimeError(f"Git command failed: {cmd}\n{result.stderr or result.stdout}")
     return (result.stdout or "").strip()
-
-
-def _run_git_returncode(args, env=None):
-    import os
-
-    full_env = {**os.environ, **(env or {})}
-    result = subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        env=full_env,
-        cwd=str(get_repo_root()),
-    )
-    return result.returncode
 
 
 def _commit_exists(commit_sha):
@@ -71,7 +62,8 @@ def _commit_exists(commit_sha):
         return False
     if not COMMIT_HASH_RE.fullmatch(commit_sha):
         raise ValueError("Invalid lastCommitHash value")
-    return _run_git_returncode(["git", "cat-file", "-e", f"{commit_sha}^{{commit}}"]) == 0
+    result = _run_git(["git", "cat-file", "-e", f"{commit_sha}^{{commit}}"], return_result=True)
+    return result.returncode == 0
 
 
 def _resolve_since_iso(since_value):
@@ -119,7 +111,11 @@ def commit_file(file_paths, message, changed):
             pp = cwd / pp
         relative_paths.append(str(pp.relative_to(cwd)))
     _run_git(["git", "add", "-A", "--ignore-errors", "--", *relative_paths], env=env)
-    staged_rc = _run_git_returncode(["git", "diff", "--cached", "--quiet", "--", *relative_paths])
+    staged_result = _run_git(
+        ["git", "diff", "--cached", "--quiet", "--", *relative_paths],
+        return_result=True,
+    )
+    staged_rc = staged_result.returncode
     if staged_rc == 0:
         return
     if staged_rc not in (0, 1):
